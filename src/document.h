@@ -42,6 +42,10 @@
 #endif
 
 
+typedef void (*DocumentMessageResponseCallback) (GeanyDocument *doc,
+	gint response_id, gpointer user_data);
+
+
 /** File Prefs. */
 typedef struct GeanyFilePrefs
 {
@@ -277,5 +281,12 @@ gint document_compare_by_tab_order(gconstpointer a, gconstpointer b);
 gint document_compare_by_tab_order_reverse(gconstpointer a, gconstpointer b);
 
 void document_grab_focus(GeanyDocument *doc);
+
+void document_show_message(GeanyDocument *doc, GtkMessageType msgtype,
+	DocumentMessageResponseCallback response_cb, gpointer response_cb_data,
+	const gchar *btn_1, GtkResponseType response_1,
+	const gchar *btn_2, GtkResponseType response_2,
+	const gchar *btn_3, GtkResponseType response_3,
+	const gchar *extra_text, const gchar *format, ...);
 
 #endif
