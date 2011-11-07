@@ -60,7 +60,7 @@ on_window_drag_data_received(GtkWidget *widget, GdkDragContext *drag_context,
 		guint event_time, gpointer user_data);
 
 static void
-notebook_tab_close_clicked_cb(GtkButton *button, gpointer user_data);
+notebook_tab_close_clicked_cb(GtkButton *button, GeanyDocument *doc);
 
 static void setup_tab_dnd(void);
 
@@ -342,7 +342,7 @@ static void tab_count_changed(void)
 }
 
 
-static gboolean notebook_tab_click(GtkWidget *widget, GdkEventButton *event, gpointer data)
+static gboolean notebook_tab_click(GtkWidget *widget, GdkEventButton *event, GeanyDocument *doc)
 {
 	guint state;
 
@@ -357,8 +357,8 @@ static gboolean notebook_tab_click(GtkWidget *widget, GdkEventButton *event, gpo
 	/* close tab on middle click */
 	if (event->button == 2)
 	{
-		document_remove_page(gtk_notebook_page_num(GTK_NOTEBOOK(main_widgets.notebook),
-			GTK_WIDGET(data)));
+		g_return_val_if_fail(DOC_VALID(doc), FALSE);
+		document_close(doc);
 		return TRUE; /* stop other handlers like notebook_tab_bar_click_cb() */
 	}
 	/* switch last used tab on ctrl-click */
@@ -405,7 +405,7 @@ gint notebook_new_tab(GeanyDocument *this)
 	 * the close button, if any */
 	ebox = gtk_event_box_new();
 	GTK_WIDGET_SET_FLAGS(ebox, GTK_NO_WINDOW);
-	g_signal_connect(ebox, "button-press-event", G_CALLBACK(notebook_tab_click), page);
+	g_signal_connect(ebox, "button-press-event", G_CALLBACK(notebook_tab_click), this);
 	/* focus the current document after clicking on a tab */
 	g_signal_connect_after(ebox, "button-release-event",
 		G_CALLBACK(focus_sci), NULL);
@@ -430,9 +430,9 @@ gint notebook_new_tab(GeanyDocument *this)
 		gtk_container_add(GTK_CONTAINER(align), btn);
 		gtk_box_pack_start(GTK_BOX(hbox), align, TRUE, TRUE, 0);
 
-		g_signal_connect(btn, "clicked", G_CALLBACK(notebook_tab_close_clicked_cb), page);
+		g_signal_connect(btn, "clicked", G_CALLBACK(notebook_tab_close_clicked_cb), this);
 		/* button overrides event box, so make middle click on button also close tab */
-		g_signal_connect(btn, "button-press-event", G_CALLBACK(notebook_tab_click), page);
+		g_signal_connect(btn, "button-press-event", G_CALLBACK(notebook_tab_click), this);
 		/* handle style modification to keep button small as possible even when theme change */
 		g_signal_connect(btn, "style-set", G_CALLBACK(notebook_tab_close_button_style_set), NULL);
 	}
@@ -462,12 +462,9 @@ gint notebook_new_tab(GeanyDocument *this)
 
 
 static void
-notebook_tab_close_clicked_cb(GtkButton *button, gpointer user_data)
+notebook_tab_close_clicked_cb(GtkButton *button, GeanyDocument *doc)
 {
-	gint cur_page = gtk_notebook_page_num(GTK_NOTEBOOK(main_widgets.notebook),
-		GTK_WIDGET(user_data));
-
-	document_remove_page(cur_page);
+	document_close(doc);
 }
 
 
