@@ -2872,16 +2872,35 @@ static void monitor_reload_file(GeanyDocument *doc)
 {
 	gchar *base_name = g_path_get_basename(doc->file_name);
 
-	document_show_message(doc, GTK_MESSAGE_QUESTION,
-		(DocumentMessageResponseCallback) on_monitor_reload_file_response, NULL,
-		_("_Reload"), GTK_RESPONSE_ACCEPT,
-		GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-		NULL, GTK_RESPONSE_NONE,
-		_("Do you want to reload it?"),
-		_("The file '%s' on the disk is more recent than the current buffer."),
-		base_name);
+	if (interface_prefs.use_document_messages)
+	{
+		document_show_message(doc, GTK_MESSAGE_QUESTION,
+			(DocumentMessageResponseCallback) on_monitor_reload_file_response, NULL,
+			_("_Reload"), GTK_RESPONSE_ACCEPT,
+			GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+			NULL, GTK_RESPONSE_NONE,
+			_("Do you want to reload it?"),
+			_("The file '%s' on the disk is more recent than the current buffer."),
+			base_name);
 
-	document_set_text_changed(doc, TRUE);
+		document_set_text_changed(doc, TRUE);
+	}
+	else
+	{
+		gint ret;
+		ret = dialogs_show_prompt(NULL,
+			GTK_STOCK_CLOSE, GTK_RESPONSE_CLOSE,
+			GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+			_("_Reload"), GTK_RESPONSE_ACCEPT,
+			_("Do you want to reload it?"),
+			_("Do you want to reload it?"),
+			_("The file '%s' on the disk is more recent than the current buffer."),
+			base_name);
+		if (ret == GTK_RESPONSE_ACCEPT)
+			document_reload_file(doc, doc->encoding);
+		else
+			document_close(doc);
+	}
 
 	g_free(base_name);
 }
@@ -2905,14 +2924,43 @@ static void on_monitor_resave_missing_file_response(GeanyDocument *doc, gint res
 
 static void monitor_resave_missing_file(GeanyDocument *doc)
 {
-	document_show_message(doc, GTK_MESSAGE_QUESTION,
-		(DocumentMessageResponseCallback)on_monitor_resave_missing_file_response, NULL,
-		GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
-		GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-		NULL, GTK_RESPONSE_NONE,
-		_("Try to resave the file?"),
-		_("File \"%s\" was not found on disk!"),
-		doc->file_name);
+	if (interface_prefs.use_document_messages)
+	{
+		document_show_message(doc, GTK_MESSAGE_QUESTION,
+			(DocumentMessageResponseCallback)on_monitor_resave_missing_file_response, NULL,
+			GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
+			GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+			NULL, GTK_RESPONSE_NONE,
+			_("Try to resave the file?"),
+			_("File \"%s\" was not found on disk!"),
+			doc->file_name);
+	}
+	else
+	{
+		gboolean file_saved;
+		gint ret;
+
+		ret = dialogs_show_prompt(NULL,
+			_("Close _without saving"), GTK_RESPONSE_CLOSE,
+			GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+			GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
+			_("Try to resave the file?"),
+			_("File \"%s\" was not found on disk!"),
+			doc->file_name);
+
+		if (ret == GTK_RESPONSE_ACCEPT)
+			file_saved = dialogs_show_save_as();
+		else if (ret == GTK_RESPONSE_CLOSE)
+			document_close(doc);
+
+		if (ret != GTK_RESPONSE_CLOSE && !file_saved)
+		{
+			document_set_text_changed(doc, TRUE);
+			/* don't prompt more than once */
+			g_free(doc->real_path);
+			doc->real_path = NULL;
+		}
+	}
 }
 
 
@@ -3125,7 +3173,7 @@ static void on_document_message_response(GtkWidget *info_widget, gint response_i
  * @param format The text format for the main message.
  * @param ... Used with @a format as in @c printf.
  *
- * @since 1.22 (GEANY_API_VERSION 211)
+ * @since 1.22 (GEANY_API_VERSION 212)
  */
 void document_show_message(GeanyDocument *doc, GtkMessageType msgtype,
 	DocumentMessageResponseCallback response_cb, gpointer response_cb_data,
