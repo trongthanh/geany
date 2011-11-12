@@ -1013,7 +1013,7 @@ static void trigger_button_event(GtkWidget *widget, guint32 event_time)
 	if (GTK_IS_TEXT_VIEW(widget))
 		event->window = gtk_text_view_get_window(GTK_TEXT_VIEW(widget), GTK_TEXT_WINDOW_TEXT);
 	else
-		event->window = widget->window;
+		event->window = gtk_widget_get_window(widget);
 	event->time = event_time;
 	event->type = GDK_BUTTON_PRESS;
 	event->button = 3;
@@ -2544,7 +2544,7 @@ static gboolean cb_func_document_action(guint key_id)
 			ui_document_show_hide(doc);
 			break;
 		case GEANY_KEYS_DOCUMENT_RELOADTAGLIST:
-			document_update_tag_list(doc, TRUE);
+			document_update_tags(doc);
 			break;
 		case GEANY_KEYS_DOCUMENT_FOLDALL:
 			editor_fold_all(doc->editor);
