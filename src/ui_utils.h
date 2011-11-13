@@ -61,6 +61,8 @@ typedef struct GeanyInterfacePrefs
 	gboolean		use_native_windows_dialogs;
 	/** whether compiler messages window is automatically scrolled to show new messages */
 	gboolean		compiler_tab_autoscroll;
+	/** whether to use GtkInfoBar to show document-related messages instead of modal dialogs **/
+	gboolean		use_document_messages;
 }
 GeanyInterfacePrefs;
 
