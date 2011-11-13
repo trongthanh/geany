@@ -3183,6 +3183,30 @@ static void on_document_message_response(GtkWidget *info_widget, gint response_i
 }
 
 
+/* Sends a response signal for any GtkInfoBar messages when the number
+ * is greater than the interface pref max. */
+static void cancel_document_messages_overflow(GtkWidget *parent)
+{
+	gint i = 0;
+	GList *children, *iter;
+
+	g_return_if_fail(GTK_IS_CONTAINER(parent));
+
+	children = gtk_container_get_children(GTK_CONTAINER(parent));
+
+	for (iter = children; iter != NULL; iter = g_list_next(iter))
+	{
+		if (!GTK_IS_INFO_BAR(iter->data))
+			continue;
+		if (i >= interface_prefs.doc_messages_max)
+			gtk_info_bar_response(GTK_INFO_BAR(iter->data), GTK_RESPONSE_CANCEL);
+		i++;
+	}
+
+	g_list_free(children);
+}
+
+
 /*
  * Shows a message related to a document.
  *
@@ -3205,7 +3229,7 @@ static void on_document_message_response(GtkWidget *info_widget, gint response_i
  * @param format The text format for the main message.
  * @param ... Used with @a format as in @c printf.
  *
- * @since 1.22 (GEANY_API_VERSION 211)
+ * @since 1.22
  * @note Only available with GTK+ 2.18 or greater.
  */
 static void document_show_message(GeanyDocument *doc, GtkMessageType msgtype,
@@ -3294,6 +3318,9 @@ static void document_show_message(GeanyDocument *doc, GtkMessageType msgtype,
 		document_get_notebook_page(doc));
 	gtk_box_pack_start(GTK_BOX(parent), info_widget, FALSE, TRUE, 0);
 	gtk_box_reorder_child(GTK_BOX(parent), info_widget, 0);
+
+	/* cleanup old messages */
+	cancel_document_messages_overflow(parent);
 
 	gtk_widget_show_all(info_widget);
 }
