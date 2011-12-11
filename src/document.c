@@ -1541,7 +1541,7 @@ static gsize save_convert_to_encoding(GeanyDocument *doc, gchar **data, gsize *l
 	gsize bytes_read;
 	gsize conv_len;
 
-	g_return_val_if_fail(data != NULL || *data == NULL, FALSE);
+	g_return_val_if_fail(data != NULL && *data != NULL, FALSE);
 	g_return_val_if_fail(len != NULL, FALSE);
 
 	/* try to convert it from UTF-8 to original encoding */
@@ -1995,7 +1995,7 @@ gint document_find_text(GeanyDocument *doc, const gchar *text, const gchar *orig
 		}
 
 		/* we searched only part of the document, so ask whether to wraparound. */
-		if (search_prefs.suppress_dialogs ||
+		if (search_prefs.always_wrap ||
 			dialogs_show_question_full(parent, GTK_STOCK_FIND, GTK_STOCK_CANCEL,
 				_("Wrap search and find again?"), _("\"%s\" was not found."), original_text))
 		{
@@ -2316,9 +2316,18 @@ void document_update_tags(GeanyDocument *doc)
 		return;
 	}
 
+	len = sci_get_length(doc->editor->sci);
+	/* tm_source_file_buffer_update() below don't support 0-length data,
+	 * so just empty the tags array and leave */
+	if (len < 1)
+	{
+		tm_tags_array_free(doc->tm_file->tags_array, FALSE);
+		sidebar_update_tag_list(doc, FALSE);
+		return;
+	}
+
 	/* Parse Scintilla's buffer directly using TagManager
 	 * Note: this buffer *MUST NOT* be modified */
-	len = sci_get_length(doc->editor->sci);
 	buffer_ptr = (guchar *) scintilla_send_message(doc->editor->sci, SCI_GETCHARACTERPOINTER, 0, 0);
 	tm_source_file_buffer_update(doc->tm_file, buffer_ptr, len, TRUE);
 

@@ -43,7 +43,6 @@
 #include "main.h"
 #include "prefix.h"
 #include "prefs.h"
-#include "interface.h"
 #include "support.h"
 #include "callbacks.h"
 #include "log.h"
@@ -140,6 +139,7 @@ static GOptionEntry entries[] =
 	{ "no-plugins", 'p', 0, G_OPTION_ARG_NONE, &no_plugins, N_("Don't load plugins"), NULL },
 #endif
 	{ "print-prefix", 0, 0, G_OPTION_ARG_NONE, &print_prefix, N_("Print Geany's installation prefix"), NULL },
+	{ "read-only", 'r', 0, G_OPTION_ARG_NONE, &cl_options.readonly, N_("Open all FILES in read-only mode (see documention)"), NULL },
 	{ "no-session", 's', G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &cl_options.load_session, N_("Don't load the previous session's files"), NULL },
 #ifdef HAVE_VTE
 	{ "no-terminal", 't', 0, G_OPTION_ARG_NONE, &no_vte, N_("Don't load terminal support"), NULL },
@@ -155,13 +155,19 @@ static GOptionEntry entries[] =
 static void setup_window_position(void)
 {
 	/* interprets the saved window geometry */
-	if (prefs.save_winpos && ui_prefs.geometry[0] != -1)
-	{
-		gtk_window_move(GTK_WINDOW(main_widgets.window), ui_prefs.geometry[0], ui_prefs.geometry[1]);
-		gtk_window_set_default_size(GTK_WINDOW(main_widgets.window), ui_prefs.geometry[2], ui_prefs.geometry[3]);
-		if (ui_prefs.geometry[4] == 1)
-			gtk_window_maximize(GTK_WINDOW(main_widgets.window));
-	}
+	if (!prefs.save_winpos)
+		return;
+
+	if (ui_prefs.geometry[0] != -1 && ui_prefs.geometry[1] != -1)
+		gtk_window_move(GTK_WINDOW(main_widgets.window),
+			ui_prefs.geometry[0], ui_prefs.geometry[1]);
+
+	if (ui_prefs.geometry[2] != -1 && ui_prefs.geometry[3] != -1)
+		gtk_window_set_default_size(GTK_WINDOW(main_widgets.window),
+			ui_prefs.geometry[2], ui_prefs.geometry[3]);
+
+	if (ui_prefs.geometry[4] == 1)
+		gtk_window_maximize(GTK_WINDOW(main_widgets.window));
 }
 
 
@@ -223,6 +229,8 @@ static void apply_settings(void)
 static void main_init(void)
 {
 	/* inits */
+	ui_init_builder();
+
 	main_widgets.window				= NULL;
 	app->project			= NULL;
 	ui_widgets.open_fontsel		= NULL;
@@ -496,7 +504,7 @@ static void parse_command_line_options(gint *argc, gchar ***argv)
 	GError *error = NULL;
 	GOptionContext *context;
 	gint i;
-	CommandLineOptions def_clo = {FALSE, NULL, TRUE, -1, -1, FALSE, FALSE};
+	CommandLineOptions def_clo = {FALSE, NULL, TRUE, -1, -1, FALSE, FALSE, FALSE};
 
 	/* first initialise cl_options fields with default values */
 	cl_options = def_clo;
@@ -773,7 +781,7 @@ gboolean main_handle_filename(const gchar *locale_filename)
 
 	if (g_file_test(filename, G_FILE_TEST_IS_REGULAR))
 	{
-		doc = document_open_file(filename, FALSE, NULL, NULL);
+		doc = document_open_file(filename, cl_options.readonly, NULL, NULL);
 		/* add recent file manually if opening_session_files is set */
 		if (doc != NULL && main_status.opening_session_files)
 			ui_add_recent_document(doc);
@@ -1251,6 +1259,8 @@ void main_quit()
 	geany_object = NULL;
 
 	g_free(app);
+
+	ui_finalize_builder();
 
 	gtk_main_quit();
 }
