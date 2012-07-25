@@ -1,8 +1,8 @@
 /*
  *      document.h - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2005-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2006-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2005-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2006-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -28,6 +28,8 @@
 
 #ifndef GEANY_DOCUMENT_H
 #define GEANY_DOCUMENT_H 1
+
+G_BEGIN_DECLS
 
 #include "Scintilla.h"
 #include "ScintillaWidget.h"
@@ -66,6 +68,7 @@ typedef struct GeanyFilePrefs
 	gboolean		gio_unsafe_save_backup;
 	gboolean		use_gio_unsafe_file_saving; /* whether to use GIO as the unsafe backend */
 	gchar			*extract_filetype_regex;	/* regex to extract filetype on opening */
+	gboolean		tab_close_switch_to_mru;
 }
 GeanyFilePrefs;
 
@@ -240,6 +243,8 @@ void document_update_tags(GeanyDocument *doc);
 
 void document_update_tag_list_in_idle(GeanyDocument *doc);
 
+void document_highlight_tags(GeanyDocument *doc);
+
 void document_set_encoding(GeanyDocument *doc, const gchar *new_encoding);
 
 gboolean document_check_disk_status(GeanyDocument *doc, gboolean force);
@@ -279,5 +284,7 @@ gint document_compare_by_tab_order(gconstpointer a, gconstpointer b);
 gint document_compare_by_tab_order_reverse(gconstpointer a, gconstpointer b);
 
 void document_grab_focus(GeanyDocument *doc);
+
+G_END_DECLS
 
 #endif

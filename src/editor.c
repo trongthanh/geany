@@ -1,9 +1,9 @@
 /*
  *      editor.c - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2005-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2006-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
- *      Copyright 2009-2011 Frank Lanitz <frank(at)frank(dot)uvena(dot)de>
+ *      Copyright 2005-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2006-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2009-2012 Frank Lanitz <frank(at)frank(dot)uvena(dot)de>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -41,12 +41,6 @@
 
 #include "SciLexer.h"
 #include "geany.h"
-
-#ifdef HAVE_REGEX_H
-# include <regex.h>
-#else
-# include "gnuregex.h"
-#endif
 
 #include "support.h"
 #include "editor.h"
@@ -277,7 +271,7 @@ void editor_snippets_init(void)
 
 	/* check for old autocomplete.conf files (backwards compatibility) */
 	if (! g_file_test(userconfigfile, G_FILE_TEST_IS_REGULAR))
-		setptr(userconfigfile,
+		SETPTR(userconfigfile,
 			g_strconcat(app->configdir, G_DIR_SEPARATOR_S, "autocomplete.conf", NULL));
 
 	/* load the actual config files */
@@ -600,11 +594,18 @@ static void check_line_breaking(GeanyEditor *editor, gint pos, gchar c)
 }
 
 
-static void show_autocomplete(ScintillaObject *sci, gsize rootlen, const gchar *words)
+static void show_autocomplete(ScintillaObject *sci, gsize rootlen, GString *words)
 {
+	/* hide autocompletion if only option is already typed */
+	if (rootlen >= words->len ||
+		(words->str[rootlen] == '?' && rootlen >= words->len - 2))
+	{
+		sci_send_command(sci, SCI_AUTOCCANCEL);
+		return;
+	}
 	/* store whether a calltip is showing, so we can reshow it after autocompletion */
 	calltip.set = (gboolean) SSM(sci, SCI_CALLTIPACTIVE, 0, 0);
-	SSM(sci, SCI_AUTOCSHOW, rootlen, (sptr_t) words);
+	SSM(sci, SCI_AUTOCSHOW, rootlen, (sptr_t) words->str);
 }
 
 
@@ -639,7 +640,7 @@ static void show_tags_list(GeanyEditor *editor, const GPtrArray *tags, gsize roo
 			else
 				g_string_append(words, "?1");
 		}
-		show_autocomplete(sci, rootlen, words->str);
+		show_autocomplete(sci, rootlen, words);
 		g_string_free(words, TRUE);
 	}
 }
@@ -1700,9 +1701,9 @@ void editor_find_current_word_sciwc(GeanyEditor *editor, gint pos, gchar *word, 
  *
  *  @param editor The editor to operate on.
  *  @param pos The position where the word should be read from.
- *             Maybe @c -1 to use the current position.
+ *             May be @c -1 to use the current position.
  *  @param wordchars The wordchars to separate words. wordchars mean all characters to count
- *                   as part of a word. Maybe @c NULL to use the default wordchars,
+ *                   as part of a word. May be @c NULL to use the default wordchars,
  *                   see @ref GEANY_WORDCHARS.
  *
  *  @return A newly-allocated string containing the word at the given @a pos or @c NULL.
@@ -1743,9 +1744,9 @@ static gint find_previous_brace(ScintillaObject *sci, gint pos)
 	while (pos >= 0 && pos > orig_pos - 300)
 	{
 		c = sci_get_char_at(sci, pos);
-		pos--;
 		if (utils_is_opening_brace(c, editor_prefs.brace_match_ltgt))
 			return pos;
+		pos--;
 	}
 	return -1;
 }
@@ -1762,8 +1763,8 @@ static gint find_start_bracket(ScintillaObject *sci, gint pos)
 
 		if (c == ')') brackets++;
 		else if (c == '(') brackets--;
-		pos--;
 		if (brackets < 0) return pos;	/* found start bracket */
+		pos--;
 	}
 	return -1;
 }
@@ -1834,7 +1835,8 @@ static gchar *find_calltip(const gchar *word, GeanyFiletype *ft)
 
 	tag = TM_TAG(tags->pdata[0]);
 
-	if (tag->type == tm_tag_class_t && FILETYPE_ID(ft) == GEANY_FILETYPES_D)
+	if (ft->id == GEANY_FILETYPES_D &&
+		(tag->type == tm_tag_class_t || tag->type == tm_tag_struct_t))
 	{
 		/* user typed e.g. 'new Classname(' so lookup D constructor Classname::this() */
 		tags = tm_workspace_find_scoped("this", tag->name,
@@ -1974,7 +1976,7 @@ gchar *editor_get_calltip_text(GeanyEditor *editor, const TMTag *tag)
 static gboolean
 autocomplete_html(ScintillaObject *sci, const gchar *root, gsize rootlen)
 {
-	guint i, j = 0;
+	guint i;
 	gboolean found = FALSE;
 	GString *words;
 	const gchar **entities = symbols_get_html_entities();
@@ -1992,14 +1994,15 @@ autocomplete_html(ScintillaObject *sci, const gchar *root, gsize rootlen)
 
 		if (! strncmp(entities[i], root, rootlen))
 		{
-			if (j++ > 0)
+			if (words->len)
 				g_string_append_c(words, '\n');
+
 			g_string_append(words, entities[i]);
 			found = TRUE;
 		}
 	}
 	if (found)
-		show_autocomplete(sci, rootlen, words->str);
+		show_autocomplete(sci, rootlen, words);
 
 	g_string_free(words, TRUE);
 	return found;
@@ -2028,23 +2031,38 @@ autocomplete_tags(GeanyEditor *editor, const gchar *root, gsize rootlen)
 }
 
 
-/* Check whether to use entity autocompletion:
- * - always in a HTML file except when inside embedded JavaScript, Python, ASP, ...
- * - in a PHP file only when we are outside of <? ?> */
-static gboolean autocomplete_check_for_html(gint ft_id, gint style)
+static gboolean autocomplete_check_html(GeanyEditor *editor, gint style, gint pos)
 {
+	GeanyFiletype *ft = editor->document->file_type;
+	gboolean try = FALSE;
+
 	/* use entity completion when style is not JavaScript, ASP, Python, PHP, ...
 	 * (everything after SCE_HJ_START is for embedded scripting languages) */
-	if (ft_id == GEANY_FILETYPES_HTML && style < SCE_HJ_START)
-		return TRUE;
-
-	if (ft_id == GEANY_FILETYPES_PHP)
+	if (ft->id == GEANY_FILETYPES_HTML && style < SCE_HJ_START)
+		try = TRUE;
+	else if (sci_get_lexer(editor->sci) == SCLEX_XML && style < SCE_HJ_START)
+		try = TRUE;
+	else if (ft->id == GEANY_FILETYPES_PHP)
 	{
 		/* use entity completion when style is outside of PHP styles */
 		if (! is_style_php(style))
-			return TRUE;
+			try = TRUE;
 	}
+	if (try)
+	{
+		gchar root[GEANY_MAX_WORD_LENGTH];
+		gchar *tmp;
 
+		read_current_word(editor, pos, root, sizeof(root), GEANY_WORDCHARS"&", TRUE);
+
+		/* Allow something like "&quot;some text&quot;".
+		 * for entity completion we want to have completion for '&' within words. */
+		tmp = strchr(root, '&');
+		if (tmp != NULL)
+		{
+			return autocomplete_html(editor->sci, tmp, strlen(tmp));
+		}
+	}
 	return FALSE;
 }
 
@@ -2133,7 +2151,7 @@ static gboolean autocomplete_doc_word(GeanyEditor *editor, gchar *root, gsize ro
 
 	g_slist_free(words);
 
-	show_autocomplete(sci, rootlen, str->str);
+	show_autocomplete(sci, rootlen, str);
 	g_string_free(str, TRUE);
 	return TRUE;
 }
@@ -2170,11 +2188,10 @@ gboolean editor_start_auto_complete(GeanyEditor *editor, gint pos, gboolean forc
 		return FALSE;
 
 	autocomplete_scope(editor);
+	ret = autocomplete_check_html(editor, style, pos);
 
 	if (ft->id == GEANY_FILETYPES_LATEX)
 		wordchars = GEANY_WORDCHARS"\\"; /* add \ to word chars if we are in a LaTeX file */
-	else if (ft->id == GEANY_FILETYPES_HTML || ft->id == GEANY_FILETYPES_PHP)
-		wordchars = GEANY_WORDCHARS"&"; /* add & to word chars if we are in a PHP or HTML file */
 	else
 		wordchars = GEANY_WORDCHARS;
 
@@ -2182,24 +2199,12 @@ gboolean editor_start_auto_complete(GeanyEditor *editor, gint pos, gboolean forc
 	root = cword;
 	rootlen = strlen(root);
 
-	if (rootlen > 0)
+	if (!ret && rootlen > 0)
 	{
-		if (autocomplete_check_for_html(ft->id, style))
-		{
-			/* Allow something like "&quot;some text&quot;". The above startword calculation
-			 * only works on words but for HTML entity completion we also want to have completion
-			 * based on '&' within words. */
-			gchar *tmp = strchr(root, '&');
-			if (tmp != NULL)
-			{
-				root = tmp;
-				rootlen = strlen(tmp);
-			}
-			ret = autocomplete_html(sci, root, rootlen);
-		}
-		else if (ft->id == GEANY_FILETYPES_PHP && style == SCE_HPHP_DEFAULT &&
-				 rootlen == 3 && strcmp(root, "php") == 0 && pos >= 5 &&
-				 sci_get_char_at(sci, pos - 5) == '<' && sci_get_char_at(sci, pos - 4) == '?')
+		if (ft->id == GEANY_FILETYPES_PHP && style == SCE_HPHP_DEFAULT &&
+			rootlen == 3 && strcmp(root, "php") == 0 && pos >= 5 &&
+			sci_get_char_at(sci, pos - 5) == '<' &&
+			sci_get_char_at(sci, pos - 4) == '?')
 		{
 			/* nothing, don't complete PHP open tags */
 		}
@@ -2293,7 +2298,7 @@ static void fix_indentation(GeanyEditor *editor, GString *buf)
 		gchar *str;
 
 		/* for tabs+spaces mode we want the real tab width, not indent width */
-		setptr(whitespace, g_strnfill(sci_get_tab_width(editor->sci), ' '));
+		SETPTR(whitespace, g_strnfill(sci_get_tab_width(editor->sci), ' '));
 		str = g_strdup_printf("^\t*(%s)", whitespace);
 
 		regex = g_regex_new(str, cflags, 0, NULL);
@@ -2360,7 +2365,7 @@ void editor_insert_text_block(GeanyEditor *editor, const gchar *text, gint inser
 		gchar *whitespace;
 
 		whitespace = g_strnfill(newline_indent_size, ' ');
-		setptr(whitespace, g_strconcat(nl, whitespace, NULL));
+		SETPTR(whitespace, g_strconcat(nl, whitespace, NULL));
 		utils_string_replace_all(buf, nl, whitespace);
 		g_free(whitespace);
 	}
@@ -4320,7 +4325,13 @@ void editor_replace_spaces(GeanyEditor *editor)
 		search_pos = sci_find_text(editor->sci, SCFIND_MATCHCASE, &ttf);
 		if (search_pos == -1)
 			break;
-
+		/* only replace indentation because otherwise we can mess up alignment */
+		if (search_pos > sci_get_line_indent_position(editor->sci,
+			sci_get_line_from_position(editor->sci, search_pos)))
+		{
+			ttf.chrg.cpMin = search_pos + tab_len;
+			continue;
+		}
 		sci_set_target_start(editor->sci, search_pos);
 		sci_set_target_end(editor->sci, search_pos + tab_len);
 		sci_replace_target(editor->sci, "\t", FALSE);
@@ -4733,7 +4744,7 @@ void editor_destroy(GeanyEditor *editor)
 
 static void on_document_save(GObject *obj, GeanyDocument *doc)
 {
-	gchar *f = utils_build_path(app->configdir, "snippets.conf", NULL);
+	gchar *f = g_build_filename(app->configdir, "snippets.conf", NULL);
 
 	g_return_if_fail(NZV(doc->real_path));
 
@@ -4780,7 +4791,7 @@ void editor_init(void)
 	 * handler (on_editor_notify) is called */
 	g_signal_connect_after(geany_object, "editor-notify", G_CALLBACK(on_editor_notify), NULL);
 
-	f = utils_build_path(app->configdir, "snippets.conf", NULL);
+	f = g_build_filename(app->configdir, "snippets.conf", NULL);
 	ui_add_config_file_menu_item(f, NULL, NULL);
 	g_free(f);
 	g_signal_connect(geany_object, "document-save", G_CALLBACK(on_document_save), NULL);

@@ -1,8 +1,8 @@
 /*
  *      toolbar.c - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2009-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2009-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2009-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2009-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -49,7 +49,7 @@ static GSList *plugin_items = NULL;
 
 /* Available toolbar actions
  * Fields: name, stock_id, label, accelerator, tooltip, callback */
-const GtkActionEntry ui_entries[] = {
+static const GtkActionEntry ui_entries[] = {
 	/* custom actions defined in toolbar_init(): "New", "Open", "SearchEntry", "GotoEntry", "Build" */
 	{ "Save", GTK_STOCK_SAVE, NULL, NULL, N_("Save the current file"), G_CALLBACK(on_toolbutton_save_clicked) },
 	{ "SaveAs", GTK_STOCK_SAVE_AS, NULL, NULL, N_("Save as"), G_CALLBACK(on_save_as1_activate) },
@@ -79,11 +79,11 @@ const GtkActionEntry ui_entries[] = {
 	{ "Print", GTK_STOCK_PRINT, NULL, NULL, N_("Print document"), G_CALLBACK(on_print1_activate) },
 	{ "Replace", GTK_STOCK_FIND_AND_REPLACE, NULL, NULL, N_("Replace text in the current document"), G_CALLBACK(on_replace1_activate) }
 };
-const guint ui_entries_n = G_N_ELEMENTS(ui_entries);
+static const guint ui_entries_n = G_N_ELEMENTS(ui_entries);
 
 
 /* fallback UI definition */
-const gchar *toolbar_markup =
+static const gchar *toolbar_markup =
 "<ui>"
 	"<toolbar name='GeanyToolbar'>"
 	"<toolitem action='New'/>"
@@ -215,7 +215,7 @@ static GtkWidget *toolbar_reload(const gchar *markup)
 	else
 	{
 		/* Load the toolbar UI XML file from disk (first from config dir, then try data dir) */
-		filename = utils_build_path(app->configdir, "ui_toolbar.xml", NULL);
+		filename = g_build_filename(app->configdir, "ui_toolbar.xml", NULL);
 		merge_id = gtk_ui_manager_add_ui_from_file(uim, filename, &error);
 		if (merge_id == 0)
 		{
@@ -224,7 +224,7 @@ static GtkWidget *toolbar_reload(const gchar *markup)
 			g_error_free(error);
 			error = NULL;
 
-			setptr(filename, utils_build_path(app->datadir, "ui_toolbar.xml", NULL));
+			SETPTR(filename, g_build_filename(app->datadir, "ui_toolbar.xml", NULL));
 			merge_id = gtk_ui_manager_add_ui_from_file(uim, filename, &error);
 		}
 		g_free(filename);
@@ -897,7 +897,7 @@ at http://www.geany.org/manual/current/index.html#customizing-the-toolbar.\n-->\
 
 	toolbar_reload(str->str);
 
-	filename = utils_build_path(app->configdir, "ui_toolbar.xml", NULL);
+	filename = g_build_filename(app->configdir, "ui_toolbar.xml", NULL);
 	utils_write_file(filename, str->str);
 	g_free(filename);
 
@@ -1063,7 +1063,7 @@ void toolbar_configure(GtkWindow *parent)
 
 	/* read the current active toolbar items */
 	markup = gtk_ui_manager_get_ui(uim);
-	used_items = tb_editor_parse_ui(markup, strlen(markup), NULL);
+	used_items = tb_editor_parse_ui(markup, -1, NULL);
 	g_free(markup);
 
 	/* get all available actions */

@@ -1,8 +1,8 @@
 /*
  *      splitwindow.c - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2008-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
- *      Copyright 2008-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2008-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2008-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -75,11 +75,10 @@ typedef struct EditWindow
 	ScintillaObject	*sci;		/* new editor widget */
 	GtkWidget		*vbox;
 	GtkWidget		*name_label;
-	gint 			handler_id;
 }
 EditWindow;
 
-static EditWindow edit_window = {NULL, NULL, NULL, NULL, 0 };
+static EditWindow edit_window = {NULL, NULL, NULL, NULL};
 
 
 static void on_unsplit(GtkMenuItem *menuitem, gpointer user_data);
@@ -106,16 +105,32 @@ static void set_line_numbers(ScintillaObject * sci, gboolean set)
 }
 
 
-static void on_sci_notify (ScintillaObject *sci, gint param, SCNotification *notif, gpointer data)
+static void on_sci_notify(ScintillaObject *sci, gint param,
+		SCNotification *nt, gpointer data)
 {
 	gint line;
 
-	switch (notif->nmhdr.code)
+	switch (nt->nmhdr.code)
 	{
+		/* adapted from editor.c: on_margin_click() */
 		case SCN_MARGINCLICK:
-			if (notif->margin == 2)
+			/* left click to marker margin toggles marker */
+			if (nt->margin == 1)
 			{
-				line = sci_get_line_from_position(sci, notif->position);
+				gboolean set;
+				gint marker = 1;
+
+				line = sci_get_line_from_position(sci, nt->position);
+				set = sci_is_marker_set_at_line(sci, line, marker);
+				if (!set)
+					sci_set_marker_at_line(sci, line, marker);
+				else
+					sci_delete_marker_at_line(sci, line, marker);
+			}
+			/* left click on the folding margin to toggle folding state of current line */
+			if (nt->margin == 2)
+			{
+				line = sci_get_line_from_position(sci, nt->position);
 				scintilla_send_message(sci, SCI_TOGGLEFOLD, line, 0);
 			}
 			break;
@@ -140,19 +155,17 @@ static void sync_to_current(ScintillaObject *sci, ScintillaObject *current)
 
 	/* override some defaults */
 	set_line_numbers(sci, geany->editor_prefs->show_linenumber_margin);
-	scintilla_send_message(sci, SCI_SETMARGINWIDTHN, 1, 0 ); /* hide marker margin (no commands) */
+	/* marker margin */
+	scintilla_send_message(sci, SCI_SETMARGINWIDTHN, 1,
+		scintilla_send_message(current, SCI_GETMARGINWIDTHN, 1, 0));
+	if (!geany->editor_prefs->folding)
+		scintilla_send_message(sci, SCI_SETMARGINWIDTHN, 2, 0);
 }
 
 
 static void set_editor(EditWindow *editwin, GeanyEditor *editor)
 {
 	editwin->editor = editor;
-
-	if (editwin->handler_id > 0 && editwin->sci != NULL)
-	{
-		g_signal_handler_disconnect(editwin->sci, editwin->handler_id);
-		editwin->handler_id = 0;
-	}
 
 	/* first destroy any widget, otherwise its signals will have an
 	 * invalid document as user_data */
@@ -165,11 +178,10 @@ static void set_editor(EditWindow *editwin, GeanyEditor *editor)
 
 	sync_to_current(editwin->sci, editor->sci);
 
-	if (geany->editor_prefs->folding)
-		editwin->handler_id = g_signal_connect(editwin->sci, "sci-notify",
-				G_CALLBACK(on_sci_notify), NULL);
-	else
-		scintilla_send_message(editwin->sci, SCI_SETMARGINWIDTHN, 2, 0);
+	scintilla_send_message(editwin->sci, SCI_USEPOPUP, 1, 0);
+	/* for margin events */
+	g_signal_connect(editwin->sci, "sci-notify",
+			G_CALLBACK(on_sci_notify), NULL);
 
 	gtk_label_set_text(GTK_LABEL(editwin->name_label), DOC_FILENAME(editor->document));
 }
@@ -188,18 +200,6 @@ static void set_state(enum State id)
 }
 
 
-static const gchar *ui_get_stock_label(const gchar *stock_id)
-{
-	GtkStockItem item;
-
-	if (gtk_stock_lookup(stock_id, &item))
-		return item.label;
-
-	g_warning("No stock id '%s'!", stock_id);
-	return "";
-}
-
-
 /* Create a GtkToolButton with stock icon, label and tooltip.
  * @param label can be NULL to use stock label text. @a label can contain underscores,
  * which will be removed.
@@ -211,7 +211,7 @@ static GtkWidget *ui_tool_button_new(const gchar *stock_id, const gchar *label, 
 
 	if (stock_id && !label)
 	{
-		label = ui_get_stock_label(stock_id);
+		label = ui_lookup_stock_label(stock_id);
 	}
 	dupl = utils_str_remove_chars(g_strdup(label), "_");
 	label = dupl;
@@ -362,12 +362,6 @@ static void on_unsplit(GtkMenuItem *menuitem, gpointer user_data)
 
 	gtk_widget_ref(notebook);
 	gtk_container_remove(GTK_CONTAINER(pane), notebook);
-
-	if (edit_window.sci != NULL && edit_window.handler_id > 0)
-	{
-		g_signal_handler_disconnect(edit_window.sci, edit_window.handler_id);
-		edit_window.handler_id = 0;
-	}
 
 	gtk_widget_destroy(pane);
 	edit_window.editor = NULL;

@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.60])
-AC_INIT([Geany], [1.22],
+AC_INIT([Geany], [1.23],
 		[https://sourceforge.net/tracker/?group_id=153444&atid=787791])
 AC_CONFIG_SRCDIR([src/geany.h])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -38,7 +38,7 @@ AC_PROG_LN_S
 # autoscan start
 
 # Checks for header files.
-AC_CHECK_HEADERS([fcntl.h fnmatch.h glob.h regex.h stdlib.h sys/time.h])
+AC_CHECK_HEADERS([fcntl.h fnmatch.h glob.h stdlib.h sys/time.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_OFF_T
@@ -57,8 +57,10 @@ GEANY_CHECK_REVISION([dnl force debug mode for a SVN working copy
 
 
 # GTK/GLib/GIO checks
-gtk_modules="gtk+-2.0 >= 2.16 glib-2.0 >= 2.20 gio-2.0 >= 2.20"
-PKG_CHECK_MODULES([GTK], [$gtk_modules])
+gtk_modules="gtk+-2.0 >= 2.16 glib-2.0 >= 2.20"
+gtk_modules_private="gio-2.0 >= 2.20 gmodule-2.0"
+PKG_CHECK_MODULES([GTK], [$gtk_modules $gtk_modules_private])
+AC_SUBST([DEPENDENCIES], [$gtk_modules])
 AC_SUBST([GTK_CFLAGS])
 AC_SUBST([GTK_LIBS])
 GTK_VERSION=`$PKG_CONFIG --modversion gtk+-2.0`
@@ -78,10 +80,10 @@ AC_ARG_ENABLE([deprecated],
 
 # Check for binary relocation support
 GEANY_CHECK_BINRELOC
+# CTags source compatibility (we actually use GRegex instead of POSIX regcomp)
+AC_DEFINE([HAVE_REGCOMP], [1], [Should always be 1, required for CTags.])
 # Plugins support
 GEANY_CHECK_PLUGINS
-# check whether to use included GNU regex library
-GEANY_CHECK_GNU_REGEX
 # check for mingw specific settings
 GEANY_CHECK_MINGW
 
@@ -103,8 +105,9 @@ AC_CONFIG_FILES([
 		icons/48x48/Makefile
 		icons/scalable/Makefile
 		tagmanager/Makefile
-		tagmanager/include/Makefile
+		tagmanager/ctags/Makefile
 		tagmanager/mio/Makefile
+		tagmanager/src/Makefile
 		scintilla/Makefile
 		scintilla/include/Makefile
 		src/Makefile

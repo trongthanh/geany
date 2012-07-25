@@ -1,8 +1,8 @@
 /*
  *      keyfile.c - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2005-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2006-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2005-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2006-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -99,9 +99,9 @@ GPtrArray *pref_groups = NULL;
 
 static struct
 {
-	int number_ft_menu_items;
-	int number_non_ft_menu_items;
-	int number_exec_menu_items;
+	gint number_ft_menu_items;
+	gint number_non_ft_menu_items;
+	gint number_exec_menu_items;
 }
 build_menu_prefs;
 
@@ -139,6 +139,8 @@ static void init_pref_groups(void)
 
 	stash_group_add_toggle_button(group, &interface_prefs.notebook_double_click_hides_widgets,
 		"notebook_double_click_hides_widgets", FALSE, "check_double_click_hides_widgets");
+	stash_group_add_toggle_button(group, &file_prefs.tab_close_switch_to_mru,
+		"tab_close_switch_to_mru", FALSE, "check_tab_close_switch_to_mru");
 	stash_group_add_integer(group, &interface_prefs.tab_pos_sidebar, "tab_pos_sidebar", GTK_POS_TOP);
 	stash_group_add_radio_buttons(group, &interface_prefs.sidebar_pos,
 		"sidebar_pos", GTK_POS_LEFT,
@@ -565,6 +567,8 @@ static void save_ui_prefs(GKeyFile *config)
 	{
 		g_key_file_set_string_list(config, PACKAGE, "custom_commands",
 				(const gchar**) ui_prefs.custom_commands, g_strv_length(ui_prefs.custom_commands));
+		g_key_file_set_string_list(config, PACKAGE, "custom_commands_labels",
+				(const gchar**) ui_prefs.custom_commands_labels, g_strv_length(ui_prefs.custom_commands_labels));
 	}
 }
 
@@ -906,43 +910,65 @@ static void load_dialog_prefs(GKeyFile *config)
 static void load_ui_prefs(GKeyFile *config)
 {
 	gint *geo;
-	GError *error = NULL;
+	gsize geo_len;
 
 	ui_prefs.sidebar_visible = utils_get_setting_boolean(config, PACKAGE, "sidebar_visible", TRUE);
 	ui_prefs.msgwindow_visible = utils_get_setting_boolean(config, PACKAGE, "msgwindow_visible", TRUE);
 	ui_prefs.fullscreen = utils_get_setting_boolean(config, PACKAGE, "fullscreen", FALSE);
 	ui_prefs.custom_date_format = utils_get_setting_string(config, PACKAGE, "custom_date_format", "");
 	ui_prefs.custom_commands = g_key_file_get_string_list(config, PACKAGE, "custom_commands", NULL, NULL);
+	ui_prefs.custom_commands_labels = g_key_file_get_string_list(config, PACKAGE, "custom_commands_labels", NULL, NULL);
+
+	/* sanitize custom commands labels */
+	if (ui_prefs.custom_commands || ui_prefs.custom_commands_labels)
+	{
+		guint i;
+		guint cc_len = ui_prefs.custom_commands ? g_strv_length(ui_prefs.custom_commands) : 0;
+		guint cc_labels_len = ui_prefs.custom_commands_labels ? g_strv_length(ui_prefs.custom_commands_labels) : 0;
+
+		/* not enough items, resize and fill */
+		if (cc_labels_len < cc_len)
+		{
+			ui_prefs.custom_commands_labels = g_realloc(ui_prefs.custom_commands_labels,
+					(cc_len + 1) * sizeof *ui_prefs.custom_commands_labels);
+			for (i = cc_labels_len; i < cc_len; i++)
+				ui_prefs.custom_commands_labels[i] = g_strdup("");
+			ui_prefs.custom_commands_labels[cc_len] = NULL;
+		}
+		/* too many items, cut off */
+		else if (cc_labels_len > cc_len)
+		{
+			for (i = cc_len; i < cc_labels_len; i++)
+			{
+				g_free(ui_prefs.custom_commands_labels[i]);
+				ui_prefs.custom_commands_labels[i] = NULL;
+			}
+		}
+	}
 
 	scribble_text = utils_get_setting_string(config, PACKAGE, "scribble_text",
 				_("Type here what you want, use it as a notice/scratch board"));
 	scribble_pos = utils_get_setting_integer(config, PACKAGE, "scribble_pos", -1);
 
-	geo = g_key_file_get_integer_list(config, PACKAGE, "geometry", NULL, &error);
-	if (error)
+	geo = g_key_file_get_integer_list(config, PACKAGE, "geometry", &geo_len, NULL);
+	if (! geo || geo_len < 5)
 	{
 		ui_prefs.geometry[0] = -1;
-		g_error_free(error);
-		error = NULL;
+		ui_prefs.geometry[1] = -1;
+		ui_prefs.geometry[2] = -1;
+		ui_prefs.geometry[3] = -1;
+		ui_prefs.geometry[4] = 0;
 	}
 	else
 	{
-		gint i;
-
-		ui_prefs.geometry[0] = geo[0];
-		ui_prefs.geometry[1] = geo[1];
-		ui_prefs.geometry[2] = geo[2];
-		ui_prefs.geometry[3] = geo[3];
-		ui_prefs.geometry[4] = geo[4];
-
 		/* don't use insane values but when main windows was maximized last time, pos might be
 		 * negative (due to differences in root window and window decorations) */
 		/* quitting when minimized can make pos -32000, -32000 on Windows! */
-		for (i = 0; i < 4; i++)
-		{
-			if (ui_prefs.geometry[i] < -1)
-				ui_prefs.geometry[i] = -1;
-		}
+		ui_prefs.geometry[0] = MAX(-1, geo[0]);
+		ui_prefs.geometry[1] = MAX(-1, geo[1]);
+		ui_prefs.geometry[2] = MAX(-1, geo[2]);
+		ui_prefs.geometry[3] = MAX(-1, geo[3]);
+		ui_prefs.geometry[4] = geo[4] != 0;
 	}
 	hpan_position = utils_get_setting_integer(config, PACKAGE, "treeview_position", 156);
 	vpan_position = utils_get_setting_integer(config, PACKAGE, "msgwindow_position", (geo) ?
@@ -982,10 +1008,11 @@ void configuration_save_default_session(void)
  */
 void configuration_reload_default_session(void)
 {
-	const gchar *configfile = utils_build_path(app->configdir, "geany.conf", NULL);
+	gchar *configfile = g_build_filename(app->configdir, "geany.conf", NULL);
 	GKeyFile *config = g_key_file_new();
 
 	g_key_file_load_from_file(config, configfile, G_KEY_FILE_NONE, NULL);
+	g_free(configfile);
 
 	configuration_load_session_files(config, FALSE);
 
@@ -995,14 +1022,14 @@ void configuration_reload_default_session(void)
 
 gboolean configuration_load(void)
 {
-	gchar *configfile = utils_build_path(app->configdir, "geany.conf", NULL);
+	gchar *configfile = g_build_filename(app->configdir, "geany.conf", NULL);
 	GKeyFile *config = g_key_file_new();
 
 	if (! g_file_test(configfile, G_FILE_TEST_IS_REGULAR))
 	{	/* config file does not (yet) exist, so try to load a global config file which may be */
 		/* created by distributors */
 		geany_debug("No user config file found, trying to use global configuration.");
-		setptr(configfile, utils_build_path(app->datadir, "geany.conf", NULL));
+		SETPTR(configfile, g_build_filename(app->datadir, "geany.conf", NULL));
 	}
 	g_key_file_load_from_file(config, configfile, G_KEY_FILE_NONE, NULL);
 	g_free(configfile);

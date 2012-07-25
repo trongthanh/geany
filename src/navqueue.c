@@ -2,8 +2,8 @@
  *      navqueue.c - this file is part of Geany, a fast and lightweight IDE
  *
  *      Copyright 2007 Dave Moore <wrex006(at)gmail(dot)com>
- *      Copyright 2007-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2007-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2007-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2007-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -57,6 +57,9 @@ void navqueue_init()
 
 	navigation_buttons[0] = toolbar_get_action_by_name("NavBack");
 	navigation_buttons[1] = toolbar_get_action_by_name("NavFor");
+
+	gtk_action_set_sensitive(navigation_buttons[0], FALSE);
+	gtk_action_set_sensitive(navigation_buttons[1], FALSE);
 }
 
 

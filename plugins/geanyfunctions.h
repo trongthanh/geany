@@ -302,6 +302,8 @@
 	geany_functions->p_ui->ui_combo_box_add_to_history
 #define ui_menu_add_document_items_sorted \
 	geany_functions->p_ui->ui_menu_add_document_items_sorted
+#define ui_lookup_stock_label \
+	geany_functions->p_ui->ui_lookup_stock_label
 #define dialogs_show_question \
 	geany_functions->p_dialogs->dialogs_show_question
 #define dialogs_show_msgbox \
@@ -416,7 +418,19 @@
 	geany_functions->p_stash->stash_group_display
 #define stash_group_update \
 	geany_functions->p_stash->stash_group_update
+#define stash_group_free_settings \
+	geany_functions->p_stash->stash_group_free_settings
 #define symbols_get_context_separator \
 	geany_functions->p_symbols->symbols_get_context_separator
+#define build_activate_menu_item \
+	geany_functions->p_build->build_activate_menu_item
+#define build_get_current_menu_item \
+	geany_functions->p_build->build_get_current_menu_item
+#define build_remove_menu_item \
+	geany_functions->p_build->build_remove_menu_item
+#define build_set_menu_item \
+	geany_functions->p_build->build_set_menu_item
+#define build_get_group_count \
+	geany_functions->p_build->build_get_group_count
 
 #endif

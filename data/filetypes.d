@@ -5,7 +5,7 @@ default=default
 comment=comment
 commentline=comment_line
 commentdoc=comment_doc
-commentdocnested=comment_doc
+commentnested=comment
 number=number_1
 word=keyword_1
 word2=keyword_2
@@ -27,6 +27,9 @@ secondary=
 # documentation keywords for D, currently not working
 docComment=Authors Bugs Copyright Date Deprecated Examples History License Macros Params Returns See_Also Standards Throws Version
 types=
+
+[lexer_properties]
+fold.d.comment.explicit=0
 
 [settings]
 # default extension used when saving files

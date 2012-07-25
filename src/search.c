@@ -1,8 +1,8 @@
 /*
  *      search.c - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2006-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2006-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2006-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2006-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -49,12 +49,6 @@
 #ifdef G_OS_UNIX
 # include <sys/types.h>
 # include <sys/wait.h>
-#endif
-
-#ifdef HAVE_REGEX_H
-# include <regex.h>
-#else
-# include "gnuregex.h"
 #endif
 
 
@@ -155,6 +149,8 @@ static gboolean search_read_io_stderr(GIOChannel *source, GIOCondition condition
 static void search_close_pid(GPid child_pid, gint status, gpointer user_data);
 
 static gchar **search_get_argv(const gchar **argv_prefix, const gchar *dir);
+
+static GRegex *compile_regex(const gchar *str, gint sflags);
 
 
 static void
@@ -1036,7 +1032,7 @@ static void create_fif_dialog(void)
 }
 
 
-/* dir is the directory to search in (UTF-8 encoding), maybe NULL to determine it the usual way
+/* dir is the directory to search in (UTF-8 encoding), may be NULL to determine it the usual way
  * by using the current file's path */
 void search_show_find_in_files_dialog(const gchar *dir)
 {
@@ -1242,9 +1238,16 @@ on_find_dialog_response(GtkDialog *dialog, gint response, gpointer user_data)
 			gtk_widget_grab_focus(find_dlg.entry);
 			return;
 		}
-		if (settings.find_escape_sequences || search_data.flags & SCFIND_REGEXP)
+		if (search_data.flags & SCFIND_REGEXP)
 		{
-			if (! utils_str_replace_escape(search_data.text, search_data.flags & SCFIND_REGEXP))
+			GRegex *regex = compile_regex(search_data.text, search_data.flags);
+			g_regex_unref(regex);
+			if (!regex)
+				goto fail;
+		}
+		else if (settings.find_escape_sequences)
+		{
+			if (! utils_str_replace_escape(search_data.text, FALSE))
 				goto fail;
 		}
 		ui_combo_box_add_to_history(GTK_COMBO_BOX_ENTRY(user_data), search_data.original_text, 0);
@@ -1367,10 +1370,13 @@ on_replace_dialog_response(GtkDialog *dialog, gint response, gpointer user_data)
 
 	original_find = g_strdup(find);
 	original_replace = g_strdup(replace);
+
 	if (search_flags_re & SCFIND_REGEXP)
 	{
-		if (! utils_str_replace_escape(find, TRUE) ||
-			! utils_str_replace_escape(replace, TRUE))
+		GRegex *regex = compile_regex(find, search_flags_re);
+		g_regex_unref(regex);
+		/* find escapes will be handled by GRegex */
+		if (!regex || !utils_str_replace_escape(replace, TRUE))
 			goto fail;
 	}
 	else if (search_replace_escape_re)
@@ -1545,7 +1551,7 @@ search_find_in_files(const gchar *utf8_search_text, const gchar *dir, const gcha
 	gchar **argv_prefix, **argv, **opts_argv;
 	gchar *command_grep;
 	gchar *search_text = NULL;
-	guint opts_argv_len, i;
+	gint opts_argv_len, i;
 	GPid child_pid;
 	gint stdout_fd;
 	gint stderr_fd;
@@ -1563,6 +1569,14 @@ search_find_in_files(const gchar *utf8_search_text, const gchar *dir, const gcha
 		return FALSE;
 	}
 
+	if (! g_shell_parse_argv(opts, &opts_argv_len, &opts_argv, &error))
+	{
+		ui_set_statusbar(TRUE, _("Cannot parse extra options: %s"), error->message);
+		g_error_free(error);
+		g_free(command_grep);
+		return FALSE;
+	}
+
 	/* convert the search text in the preferred encoding (if the text is not valid UTF-8. assume
 	 * it is already in the preferred encoding) */
 	utf8_text_len = strlen(utf8_search_text);
@@ -1572,9 +1586,6 @@ search_find_in_files(const gchar *utf8_search_text, const gchar *dir, const gcha
 	}
 	if (search_text == NULL)
 		search_text = g_strdup(utf8_search_text);
-
-	opts_argv = g_strsplit(opts, " ", -1);
-	opts_argv_len = g_strv_length(opts_argv);
 
 	/* set grep command and options */
 	argv_prefix = g_new0(gchar*, 1 + opts_argv_len + 3 + 1);	/* last +1 for recursive arg */
@@ -1822,84 +1833,102 @@ static void search_close_pid(GPid child_pid, gint status, gpointer user_data)
 }
 
 
-static gboolean compile_regex(regex_t *regex, const gchar *str, gint sflags)
+static GRegex *compile_regex(const gchar *str, gint sflags)
 {
-	gint err;
-	gint rflags = REG_EXTENDED | REG_NEWLINE;
+	GRegex *regex;
+	GError *error = NULL;
+	gint rflags = G_REGEX_MULTILINE;
 
 	if (~sflags & SCFIND_MATCHCASE)
-		rflags |= REG_ICASE;
+		rflags |= G_REGEX_CASELESS;
 	if (sflags & (SCFIND_WHOLEWORD | SCFIND_WORDSTART))
 	{
 		geany_debug("%s: Unsupported regex flags found!", G_STRFUNC);
 	}
 
-	err = regcomp(regex, str, rflags);
-	if (err != 0)
+	regex = g_regex_new(str, rflags, 0, &error);
+	if (!regex)
 	{
-		gchar buf[256];
-
-		regerror(err, regex, buf, sizeof buf);
-		ui_set_statusbar(FALSE, _("Bad regex: %s"), buf);
-		return FALSE;
+		ui_set_statusbar(FALSE, _("Bad regex: %s"), error->message);
+		g_error_free(error);
 	}
-	return TRUE;
+	return regex;
 }
 
+
+typedef struct CharOffsets
+{
+	gint start, end;
+} CharOffsets;
+
+static CharOffsets regex_matches[10];
 
 /* groups that don't exist are handled OK as len = end - start = (-1) - (-1) = 0 */
-static gchar *get_regex_match_string(const gchar *text, regmatch_t *pmatch, gint match_idx)
+static gchar *get_regex_match_string(const gchar *text, CharOffsets *match)
 {
-	return g_strndup(&text[pmatch[match_idx].rm_so],
-		pmatch[match_idx].rm_eo - pmatch[match_idx].rm_so);
+	return g_strndup(&text[match->start], match->end - match->start);
 }
 
 
-static regmatch_t regex_matches[10];
-/* All matching text from regex_matches[0].rm_so to regex_matches[0].rm_eo */
+/* All matching text from regex_matches[0].start to regex_matches[0].end */
 static gchar *regex_match_text = NULL;
 
-static gint find_regex(ScintillaObject *sci, guint pos, regex_t *regex)
+static gint find_regex(ScintillaObject *sci, guint pos, GRegex *regex)
 {
 	const gchar *text;
-	gint flags = 0;
+	GMatchInfo *minfo;
+	gint ret = -1;
 
 	g_return_val_if_fail(pos <= (guint)sci_get_length(sci), FALSE);
 
-	if (sci_get_col_from_position(sci, pos) != 0)
-		flags = REG_NOTBOL;
+	/* clear old match */
+	SETPTR(regex_match_text, NULL);
+
 	/* Warning: any SCI calls will invalidate 'text' after calling SCI_GETCHARACTERPOINTER */
 	text = (void*)scintilla_send_message(sci, SCI_GETCHARACTERPOINTER, 0, 0);
-	text += pos;
 
-	if (regexec(regex, text, G_N_ELEMENTS(regex_matches), regex_matches, flags) == 0)
+	/* Warning: minfo will become invalid when 'text' does! */
+	if (g_regex_match_full(regex, text, -1, pos, 0, &minfo, NULL))
 	{
-		setptr(regex_match_text, get_regex_match_string(text, regex_matches, 0));
-		return regex_matches[0].rm_so + pos;
+		guint i;
+
+		/* copy whole match text and offsets before they become invalid */
+		regex_match_text = g_match_info_fetch(minfo, 0);
+
+		foreach_range(i, G_N_ELEMENTS(regex_matches))
+		{
+			gint start = -1, end = -1;
+
+			g_match_info_fetch_pos(minfo, (gint)i, &start, &end);
+			regex_matches[i].start = start;
+			regex_matches[i].end = end;
+		}
+		ret = regex_matches[0].start;
 	}
-	setptr(regex_match_text, NULL);
-	return -1;
+	g_match_info_free(minfo);
+	return ret;
 }
 
 
 gint search_find_next(ScintillaObject *sci, const gchar *str, gint flags)
 {
-	regex_t regex;
+	GRegex *regex;
 	gint ret = -1;
 	gint pos;
 
 	if (~flags & SCFIND_REGEXP)
 		return sci_search_next(sci, flags, str);
 
-	if (!compile_regex(&regex, str, flags))
+	regex = compile_regex(str, flags);
+	if (!regex)
 		return -1;
 
 	pos = sci_get_current_position(sci);
-	ret = find_regex(sci, pos, &regex);
+	ret = find_regex(sci, pos, regex);
 	if (ret >= 0)
-		sci_set_selection(sci, ret, regex_matches[0].rm_eo + pos);
+		sci_set_selection(sci, ret, regex_matches[0].end);
 
-	regfree(&regex);
+	g_regex_unref(regex);
 	return ret;
 }
 
@@ -1937,8 +1966,8 @@ gint search_replace_target(ScintillaObject *sci, const gchar *replace_text,
 		/* digit escape */
 		g_string_erase(str, i, 2);
 		/* fix match offsets by subtracting index of whole match start from the string */
-		grp = get_regex_match_string(regex_match_text - regex_matches[0].rm_so,
-			regex_matches, c - '0');
+		grp = get_regex_match_string(regex_match_text - regex_matches[0].start,
+			&regex_matches[c - '0']);
 		g_string_insert(str, i, grp);
 		i += strlen(grp);
 		g_free(grp);
@@ -1951,27 +1980,27 @@ gint search_replace_target(ScintillaObject *sci, const gchar *replace_text,
 
 gint search_find_text(ScintillaObject *sci, gint flags, struct Sci_TextToFind *ttf)
 {
-	regex_t regex;
+	GRegex *regex;
 	gint pos;
 	gint ret;
 
 	if (~flags & SCFIND_REGEXP)
 		return sci_find_text(sci, flags, ttf);
 
-	if (!compile_regex(&regex, ttf->lpstrText, flags))
+	regex = compile_regex(ttf->lpstrText, flags);
+	if (!regex)
 		return -1;
 
 	pos = ttf->chrg.cpMin;
-	ret = find_regex(sci, pos, &regex);
-	regfree(&regex);
+	ret = find_regex(sci, pos, regex);
 
 	if (ret >= 0 && ret < ttf->chrg.cpMax)
 	{
-		ttf->chrgText.cpMin = regex_matches[0].rm_so + pos;
-		ttf->chrgText.cpMax = regex_matches[0].rm_eo + pos;
-		return ret;
+		ttf->chrgText.cpMin = regex_matches[0].start;
+		ttf->chrgText.cpMax = regex_matches[0].end;
 	}
-	return -1;
+	g_regex_unref(regex);
+	return ret;
 }
 
 

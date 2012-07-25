@@ -436,7 +436,8 @@ static const keywordDesc KeywordTable [] = {
 	{ "import",         KEYWORD_IMPORT,         { 0, 0, 0, 1, 0, 0, 1 } },
 	{ "inline",         KEYWORD_INLINE,         { 0, 1, 0, 0, 0, 1, 0 } },
 	{ "in",             KEYWORD_IN,             { 0, 0, 0, 0, 0, 0, 1 } },
-	{ "inout",          KEYWORD_INOUT,          { 0, 0, 0, 0, 1, 0, 1 } },
+	{ "inout",          KEYWORD_INOUT,          { 0, 0, 0, 0, 1, 0, 0 } },
+	{ "inout",          KEYWORD_CONST,          { 0, 0, 0, 0, 0, 0, 1 } }, /* treat like const */
 	{ "input",          KEYWORD_INPUT,          { 0, 0, 0, 0, 1, 0, 0 } },
 	{ "int",            KEYWORD_INT,            { 1, 1, 1, 1, 0, 1, 1 } },
 	{ "integer",        KEYWORD_INTEGER,        { 0, 0, 0, 0, 1, 0, 0 } },
@@ -483,7 +484,8 @@ static const keywordDesc KeywordTable [] = {
 	{ "switch",         KEYWORD_SWITCH,         { 1, 1, 1, 1, 0, 1, 1 } },
 	{ "synchronized",   KEYWORD_SYNCHRONIZED,   { 0, 0, 0, 1, 0, 0, 1 } },
 	{ "task",           KEYWORD_TASK,           { 0, 0, 0, 0, 1, 0, 0 } },
-	{ "template",       KEYWORD_TEMPLATE,       { 0, 1, 0, 0, 0, 0, 1 } },
+	{ "template",       KEYWORD_TEMPLATE,       { 0, 1, 0, 0, 0, 0, 0 } },
+	{ "template",       KEYWORD_NAMESPACE,      { 0, 0, 0, 0, 0, 0, 1 } },	/* parse block */
 	{ "this",           KEYWORD_THIS,           { 0, 0, 1, 1, 0, 1, 0 } },	/* 0 to allow D ctor tags */
 	{ "throw",          KEYWORD_THROW,          { 0, 1, 1, 1, 0, 1, 1 } },
 	{ "throws",         KEYWORD_THROWS,         { 0, 0, 0, 1, 0, 1, 0 } },
@@ -1674,6 +1676,10 @@ static void skipBraces (void)
 static keywordId analyzeKeyword (const char *const name)
 {
 	const keywordId id = (keywordId) lookupKeyword (name, getSourceLanguage ());
+
+	/* ignore D @attributes, but show them in function signatures */
+	if (isLanguage(Lang_d) && id == KEYWORD_NONE && name[0] == '@')
+		return KEYWORD_CONST;
 	return id;
 }
 
@@ -2041,6 +2047,14 @@ static void processToken (tokenInfo *const token, statementInfo *const st)
 			}
 			break;
 		}
+		case KEYWORD_IF:
+			if (isLanguage (Lang_d))
+			{	/* static if (is(typeof(__traits(getMember, a, name)) == function)) */
+				int c = skipToNonWhite ();
+				if (c == '(')
+					skipToMatch ("()");
+			}
+			break;
 	}
 }
 
@@ -2107,6 +2121,29 @@ static void skipMacro (statementInfo *const st)
 	skipToMatch ("()");
 }
 
+static boolean isDPostArgumentToken(tokenInfo *const token)
+{
+	switch (token->keyword)
+	{
+		/* Note: some other keywords e.g. immutable are parsed as
+		 * KEYWORD_CONST - see initializeDParser */
+		case KEYWORD_CONST:
+		/* template constraint */
+		case KEYWORD_IF:
+		/* contracts */
+		case KEYWORD_IN:
+		case KEYWORD_OUT:
+		case KEYWORD_BODY:
+			return TRUE;
+		default:
+			break;
+	}
+	/* @attributes */
+	if (vStringValue(token->name)[0] == '@')
+		return TRUE;
+	return FALSE;
+}
+
 /*  Skips over characters following the parameter list. This will be either
  *  non-ANSI style function declarations or C++ stuff. Our choices:
  *
@@ -2168,21 +2205,9 @@ static boolean skipPostArgumentStuff (statementInfo *const st,
 				if (isident1 (c))
 				{
 					readIdentifier (token, c);
-					if (isLanguage(Lang_d))
-					{
-						switch (token->keyword)
-						{
-							/* template constraint */
-							case KEYWORD_IF:
-							/* contracts */
-							case KEYWORD_IN:
-							case KEYWORD_OUT:
-							case KEYWORD_BODY:
-								token->keyword = KEYWORD_CONST;
-							default:
-								break;
-						}
-					}
+					if (isLanguage(Lang_d) && isDPostArgumentToken(token))
+						token->keyword = KEYWORD_CONST;
+
 					switch (token->keyword)
 					{
 					case KEYWORD_ATTRIBUTE:	skipParens ();	break;
@@ -2338,6 +2363,12 @@ static int parseParens (statementInfo *const st, parenInfo *const info)
 	{
 		int c = skipToNonWhite ();
 
+		if (isLanguage(Lang_d) && c == '!')
+		{	/* template instantiation */
+			info->isNameCandidate = FALSE;
+			info->isKnrParamList = FALSE;
+		}
+		else
 		switch (c)
 		{
 			case '&':
@@ -2881,10 +2912,18 @@ static void tagCheck (statementInfo *const st)
 					qualifyFunctionTag (st, st->blockName);
 				else if (st->haveQualifyingName)
 				{
-					st->declaration = DECL_FUNCTION;
 					if (isType (prev2, TOKEN_NAME))
 						copyToken (st->blockName, prev2);
-					qualifyFunctionTag (st, prev2);
+					/* D structure templates */
+					if (isLanguage (Lang_d) &&
+						(st->declaration == DECL_CLASS || st->declaration == DECL_STRUCT ||
+						st->declaration == DECL_INTERFACE || st->declaration == DECL_NAMESPACE))
+						qualifyBlockTag (st, prev2);
+					else
+					{
+						st->declaration = DECL_FUNCTION;
+						qualifyFunctionTag (st, prev2);
+					}
 				}
 			}
 			else if (isContextualStatement (st))
@@ -3083,8 +3122,18 @@ static void initializeJavaParser (const langType language)
 
 static void initializeDParser (const langType language)
 {
+	/* keyword aliases - some are for parsing like const(Type), some are just
+	 * function attributes */
+	char *const_aliases[] = {"immutable", "nothrow", "pure", "shared", NULL};
+	char **s;
+
 	Lang_d = language;
 	buildKeywordHash (language, 6);
+
+	for (s = const_aliases; *s != NULL; s++)
+	{
+		addKeyword (*s, language, KEYWORD_CONST);
+	}
 }
 
 static void initializeGLSLParser (const langType language)

@@ -1,8 +1,8 @@
 /*
  *      document.c - this file is part of Geany, a fast and lightweight IDE
  *
- *      Copyright 2005-2011 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
- *      Copyright 2006-2011 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
+ *      Copyright 2005-2012 Enrico Tröger <enrico(dot)troeger(at)uvena(dot)de>
+ *      Copyright 2006-2012 Nick Treleaven <nick(dot)treleaven(at)btinternet(dot)com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
@@ -45,7 +45,7 @@
 #include <glib/gstdio.h>
 
 /* uncomment to use GIO based file monitoring, though it is not completely stable yet */
-#define USE_GIO_FILEMON 1
+/*#define USE_GIO_FILEMON 1*/
 #include <gio/gio.h>
 
 #include "document.h"
@@ -71,6 +71,7 @@
 #include "win32.h"
 #include "search.h"
 #include "filetypesprivate.h"
+#include "project.h"
 
 #include "SciLexer.h"
 
@@ -1191,7 +1192,7 @@ GeanyDocument *document_open_file_full(GeanyDocument *doc, const gchar *filename
 			g_return_val_if_fail(doc != NULL, NULL); /* really should not happen */
 
 			/* file exists on disk, set real_path */
-			setptr(doc->real_path, tm_get_real_path(locale_filename));
+			SETPTR(doc->real_path, tm_get_real_path(locale_filename));
 
 			doc->priv->is_remote = utils_is_remote_path(locale_filename);
 			monitor_file_setup(doc);
@@ -1301,10 +1302,11 @@ void document_open_file_list(const gchar *data, gsize length)
 
 	list = g_strsplit(data, utils_get_eol_char(utils_get_line_endings(data, length)), 0);
 
-	for (i = 0; list[i] != NULL; i++)
+	/* stop at the end or first empty item, because last item is empty but not null */
+	for (i = 0; list[i] != NULL && list[i][0] != '\0'; i++)
 	{
-		filename = g_filename_from_uri(list[i], NULL, NULL);
-		if (G_UNLIKELY(filename == NULL))
+		filename = utils_get_path_from_uri(list[i]);
+		if (filename == NULL)
 			continue;
 		document_open_file(filename, FALSE, NULL, NULL);
 		g_free(filename);
@@ -1501,10 +1503,10 @@ gboolean document_save_file_as(GeanyDocument *doc, const gchar *utf8_fname)
 	g_return_val_if_fail(doc != NULL, FALSE);
 
 	if (utf8_fname != NULL)
-		setptr(doc->file_name, g_strdup(utf8_fname));
+		SETPTR(doc->file_name, g_strdup(utf8_fname));
 
 	/* reset real path, it's retrieved again in document_save() */
-	setptr(doc->real_path, NULL);
+	SETPTR(doc->real_path, NULL);
 
 	/* detect filetype */
 	if (doc->file_type->id == GEANY_FILETYPES_NONE)
@@ -1598,7 +1600,7 @@ _("An error occurred while converting the file from UTF-8 in \"%s\". The file re
 
 
 static gchar *write_data_to_disk(const gchar *locale_filename,
-								 const gchar *data, gint len)
+								 const gchar *data, gsize len)
 {
 	GError *error = NULL;
 
@@ -1644,7 +1646,7 @@ static gchar *write_data_to_disk(const gchar *locale_filename,
 		}
 		else
 		{
-			gint bytes_written;
+			gsize bytes_written;
 
 			errno = 0;
 			bytes_written = fwrite(data, sizeof(gchar), len, fp);
@@ -1690,7 +1692,7 @@ static gchar *write_data_to_disk(const gchar *locale_filename,
 
 
 static gchar *save_doc(GeanyDocument *doc, const gchar *locale_filename,
-								 const gchar *data, gint len)
+								 const gchar *data, gsize len)
 {
 	gchar *err;
 
@@ -1743,6 +1745,7 @@ gboolean document_save_file(GeanyDocument *doc, gboolean force)
 	gchar *data;
 	gsize len;
 	gchar *locale_filename;
+	const GeanyFilePrefs *fp;
 
 	g_return_val_if_fail(doc != NULL, FALSE);
 
@@ -1757,17 +1760,18 @@ gboolean document_save_file(GeanyDocument *doc, gboolean force)
 	if (! force && ! ui_prefs.allow_always_save && (! doc->changed || doc->readonly))
 		return FALSE;
 
+	fp = project_get_file_prefs();
 	/* replaces tabs by spaces but only if the current file is not a Makefile */
-	if (file_prefs.replace_tabs && doc->file_type->id != GEANY_FILETYPES_MAKE)
+	if (fp->replace_tabs && doc->file_type->id != GEANY_FILETYPES_MAKE)
 		editor_replace_tabs(doc->editor);
 	/* strip trailing spaces */
-	if (file_prefs.strip_trailing_spaces)
+	if (fp->strip_trailing_spaces)
 		editor_strip_trailing_spaces(doc->editor);
 	/* ensure the file has a newline at the end */
-	if (file_prefs.final_new_line)
+	if (fp->final_new_line)
 		editor_ensure_final_newline(doc->editor);
 	/* ensure newlines are consistent */
-	if (file_prefs.ensure_convert_new_lines)
+	if (fp->ensure_convert_new_lines)
 		sci_convert_eols(doc->editor->sci, sci_get_eol_mode(doc->editor->sci));
 
 	/* notify plugins which may wish to modify the document before it's saved */
@@ -1821,7 +1825,7 @@ gboolean document_save_file(GeanyDocument *doc, gboolean force)
 
 		if (!file_prefs.use_safe_file_saving)
 		{
-			setptr(errmsg,
+			SETPTR(errmsg,
 				g_strdup_printf(_("%s\n\nThe file on disk may now be truncated!"), errmsg));
 		}
 		dialogs_show_msgbox_with_secondary(GTK_MESSAGE_ERROR, _("Error saving file."), errmsg);
@@ -2271,9 +2275,6 @@ void document_update_tags(GeanyDocument *doc)
 {
 	guchar *buffer_ptr;
 	gsize len;
-	GString *keywords_str;
-	gchar *keywords;
-	gint keyword_idx;
 
 	g_return_if_fail(DOC_VALID(doc));
 	g_return_if_fail(app->tm_workspace != NULL);
@@ -2332,6 +2333,16 @@ void document_update_tags(GeanyDocument *doc)
 	tm_source_file_buffer_update(doc->tm_file, buffer_ptr, len, TRUE);
 
 	sidebar_update_tag_list(doc, TRUE);
+	document_highlight_tags(doc);
+}
+
+
+/* Re-highlights type keywords without re-parsing the whole document. */
+void document_highlight_tags(GeanyDocument *doc)
+{
+	GString *keywords_str;
+	gchar *keywords;
+	gint keyword_idx;
 
 	/* some filetypes support type keywords (such as struct names), but not
 	 * necessarily all filetypes for a particular scintilla lexer.  this
@@ -2357,6 +2368,8 @@ void document_update_tags(GeanyDocument *doc)
 		default:
 			return; /* early out if type keywords are not supported */
 	}
+	if (!app->tm_workspace->work_object.tags_array)
+		return;
 
 	/* get any type keywords and tell scintilla about them
 	 * this will cause the type keywords to be colourized in scintilla */
@@ -2943,8 +2956,7 @@ static void on_monitor_resave_missing_file_response(GeanyDocument *doc, gint res
 	{
 		document_set_text_changed(doc, TRUE);
 		/* don't prompt more than once */
-		g_free(doc->real_path);
-		doc->real_path = NULL;
+		SETPTR(doc->real_path, NULL);
 	}
 	else
 		document_set_text_changed(doc, FALSE);
@@ -3022,7 +3034,8 @@ gboolean document_check_disk_status(GeanyDocument *doc, gboolean force)
 	g_return_val_if_fail(doc != NULL, FALSE);
 
 	/* ignore remote files and documents that have never been saved to disk */
-	if (file_prefs.disk_check_timeout == 0 || doc->real_path == NULL || doc->priv->is_remote)
+	if (notebook_switch_in_progress() || file_prefs.disk_check_timeout == 0
+			|| doc->real_path == NULL || doc->priv->is_remote)
 		return FALSE;
 
 	use_gio_filemon = (doc->priv->monitor != NULL);
