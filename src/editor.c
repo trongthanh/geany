@@ -811,6 +811,9 @@ static void on_char_added(GeanyEditor *editor, SCNotification *nt)
 		/* scope autocompletion */
 		case '.':
 		case ':':	/* C/C++ class:: syntax */
+            if (editor->document->file_type->id == GEANY_FILETYPES_CSS)
+                /* show calltips */
+                editor_show_calltip(editor, --pos);
 		/* tag autocompletion */
 		default:
 #if 0
@@ -1769,6 +1772,20 @@ static gint find_previous_brace(ScintillaObject *sci, gint pos)
 	return -1;
 }
 
+static gint find_start_colon(ScintillaObject *sci, gint pos)
+{
+	gint orig_pos = pos;
+
+	while (pos > 0 && pos > orig_pos - 300)
+	{
+		gchar c = sci_get_char_at(sci, pos);
+
+		if (c == ':') return pos;	/* found colon : */
+		pos--;
+	}
+	return -1;
+}
+
 
 static gint find_start_bracket(ScintillaObject *sci, gint pos)
 {
@@ -1944,8 +1961,19 @@ gboolean editor_show_calltip(GeanyEditor *editor, gint pos)
 		pos = sci_get_current_position(sci);
 		pos--;
 		orig_pos = pos;
-		pos = (lexer == SCLEX_LATEX) ? find_previous_brace(sci, pos) :
-			find_start_bracket(sci, pos);
+        
+        switch (lexer)
+        {
+            case SCLEX_LATEX:
+                pos = find_previous_brace(sci, pos);
+                break;
+            case SCLEX_CSS:
+                pos = find_start_colon(sci, pos);
+                break;
+            default:
+                find_start_bracket(sci, pos);
+        }
+			
 		if (pos == -1)
 			return FALSE;
 	}
@@ -1956,7 +1984,8 @@ gboolean editor_show_calltip(GeanyEditor *editor, gint pos)
 		return FALSE;
 
 	word[0] = '\0';
-	editor_find_current_word(editor, pos - 1, word, sizeof word, NULL);
+	//editor_find_current_word(editor, pos - 1, word, sizeof word, NULL);
+    editor_find_current_word_sciwc(editor, pos - 1, word, sizeof word);
 	if (word[0] == '\0')
 		return FALSE;
 
@@ -2210,7 +2239,9 @@ gboolean editor_start_auto_complete(GeanyEditor *editor, gint pos, gboolean forc
 
 	if (ft->id == GEANY_FILETYPES_LATEX)
 		wordchars = GEANY_WORDCHARS"\\"; /* add \ to word chars if we are in a LaTeX file */
-	else
+	else if (ft->id == GEANY_FILETYPES_CSS)
+        wordchars = GEANY_WORDCHARS"-"; /* add - to word chars if we are in a CSS file */
+    else
 		wordchars = GEANY_WORDCHARS;
 
 	read_current_word(editor, pos, cword, sizeof(cword), wordchars, TRUE);
