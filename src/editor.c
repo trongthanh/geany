@@ -1984,8 +1984,12 @@ gboolean editor_show_calltip(GeanyEditor *editor, gint pos)
 		return FALSE;
 
 	word[0] = '\0';
-	//editor_find_current_word(editor, pos - 1, word, sizeof word, NULL);
-    editor_find_current_word_sciwc(editor, pos - 1, word, sizeof word);
+    
+    if (lexer == SCLEX_CSS)
+		editor_find_current_word(editor, pos - 1, word, sizeof word, GEANY_WORDCHARS"-");
+	else
+		editor_find_current_word(editor, pos - 1, word, sizeof word, GEANY_WORDCHARS);
+    
 	if (word[0] == '\0')
 		return FALSE;
 
